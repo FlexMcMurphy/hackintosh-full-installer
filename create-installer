@@ -1,0 +1,178 @@
+#!/bin/bash
+
+#=============================================================================
+# For educational purposes only. Use at your own risk!!
+# This script is intended to be used with this YouTube video:
+# https://www.youtube.com/watch?v=fqK-dUdChwE
+# This script must be in the same directory as the BaseSystem.dmg file.
+# A USB pen drive must also be attached to you PC which the script will erase.
+#==============================================================================
+
+# Some variables with Global scope
+# The device block at which the sd card reader is attached
+dev_block=""
+
+#=========================================================================
+# The init() method 
+#=========================================================================
+init(){
+	
+# List out the currently attached devices
+echo ""
+echo "*************************************************************************
+This script aims to function somewhat like Boot Disk Utility. It will
+partition and format an attached USB drive to create macOS install media
+If your device is not listed trying plugging it out and back in again.
+*************************************************************************"
+    echo ""
+    echo "<< List of attached USB devices>>"
+    blkid -o list | grep sd
+    echo ""
+    echo "<< List of devices that are attached and mounted >>"
+    df -h | grep /dev/sd
+    echo ""
+
+	# Ask the user what do they want to do!
+	echo "Select a device block to continue.."
+	echo "[1] /dev/sda"
+	echo "[2] /dev/sdb"
+	echo "[3] /dev/sdc"
+	echo "[4] /dev/sdd"
+	echo "[5] /dev/sde"
+	echo "[6] Exit"
+
+    read -p "Enter 1 - 6: " val
+    #read -p "#? " val
+    case $val in
+        1 ) dev_block="/dev/sda"; echo "Don't try to unmount /dev/sda in Virtualbox!"; exit;;
+        2 ) dev_block="/dev/sdb";;
+        3 ) dev_block="/dev/sdc";;
+        4 ) dev_block="/dev/sdd";;
+        5 ) dev_block="/dev/sde";;
+        * ) exit;;
+    esac
+
+}
+
+unMountIfMounted(){
+	
+    # This script unmounts all partitions on a drive
+    # https://github.com/BMarkley/ParkDrive/blob/master/ParkDrive.sh
+
+    # This converts '/dev/sda' to 'sda'
+    # $dev_block = /dev/sda
+    # $disk = sda
+    #disk=${dev_block#"/dev/"}
+    #echo $disk
+
+    echo "Unmounting partitions on "$dev_block"..."
+    
+    # This unmounts all partitions of the disk at $dev_block
+    # https://askubuntu.com/a/724484/1085131
+    ls ${dev_block}?* | xargs -n1 umount -l
+
+}
+
+extractdmg(){
+
+    FILE_dmg="BaseSystem.dmg"
+    FILE_hfs="4.hfs"
+    
+    # Check if BaseSystem.dmg exists in the current directory
+    if [[ -f $FILE_dmg ]];then
+        # Check if 4.hfs exists in the current directory
+        if [[ -f $FILE_hfs ]];then
+            echo "$FILE_hfs already exists.."
+        else
+            echo "Extracting 4.hfs disk image from BaseSystem.dmg"
+            # https://applelife.ru/threads/bdu-macos-i-clover-iz-windows-izgotovlenie-zagruzochnoj-flehshki.37189/page-101#post-942736
+            # https://sourceforge.net/p/sevenzip/discussion/45797/thread/5b84059337/
+            7z e -t* BaseSystem.dmg 4.hfs
+        fi
+    else
+        echo "$FILE_dmg doesn't exist, exiting"
+        exit 1
+    fi
+
+}
+
+wipeFilesystems(){
+
+	echo "Wiping filesystems on "$dev_block"..."
+	# Credit: https://serverfault.com/a/984334/190972
+	sfdisk --delete $dev_block
+	# Another option is...
+	# sudo wipefs --all $dev_block
+	
+}
+
+#============================================================================================
+# Use sfdisk to create the partition layout on the sd card.
+#
+# The -EOF lets you indent each line between the EOFs using tabs only. There must not be any 
+# whitespace etc on the same line as the closing EOF.. AFTER the closing EOF. Omitting the
+# 'size' param in the second partition makes it take up ALL remaining space on the sd card.
+#=============================================================================================
+createPartitions(){
+
+	echo "Creating Partitions on "$dev_block"..."
+	sfdisk $dev_block -uS <<-EOF
+	start=63, size=409600, type=c, bootable
+	start=411648, type=af
+	EOF
+}
+
+createFileSystems(){
+	
+	# Partition 1 is FAT32
+	echo "Formatting "${dev_block}1" partition as FAT32..."
+	mkfs.fat -n "BDU" -F 32 ${dev_block}1
+	
+	# Partition 2 is HFS+
+	echo "Formatting "${dev_block}2" partition as HFS+..."
+	mkfs.hfsplus -v "macOS Base System" ${dev_block}2
+}
+
+mountProperly(){
+
+	echo "Mounting sd card partitions to /mnt/fat32 and /mnt/hfsplus..."
+    mkdir -p /mnt/fat32
+    mkdir -p /mnt/hfsplus
+	mount ${dev_block}1 /mnt/fat32
+	# If I don't include '-o force,rw' then it mounts partition 2 as read only and rsync fails below
+	# https://askubuntu.com/a/332317/1085131
+	mount -t hfsplus -o force,rw ${dev_block}2 /mnt/hfsplus
+}
+
+fillPartition(){
+
+    FILE="4.hfs"
+    
+    # Check if 4.hfs exists in the current directory
+    if [[ -f $FILE ]];then
+        echo "Writing 4.hfs data to USB drive..."
+        mkdir -p /mnt/4hfs
+        mount -t hfsplus -o loop 4.hfs /mnt/4hfs
+        # This will take 5-7 minutes for the copy to complete
+        # https://applelife.ru/threads/bdu-macos-i-clover-iz-windows-izgotovlenie-zagruzochnoj-flehshki.37189/page-102#post-943270
+        rsync -avxHEWz --numeric-ids --info=progress2 /mnt/4hfs/ /mnt/hfsplus
+        umount /mnt/4hfs
+    else
+        echo "$FILE doesn't exist, exiting"
+        exit 1
+    fi
+}
+
+#====================
+# Script starts here
+#====================
+
+init
+unMountIfMounted
+extractdmg
+wipeFilesystems
+createPartitions
+createFileSystems
+mountProperly
+fillPartition
+unMountIfMounted
