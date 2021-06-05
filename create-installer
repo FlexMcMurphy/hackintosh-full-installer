@@ -1,12 +1,15 @@
 #!/bin/bash
 
-#=============================================================================
+#========================================================================================
 # For educational purposes only. Use at your own risk!!
+#
 # This script is intended to be used with this YouTube video:
 # https://www.youtube.com/watch?v=fqK-dUdChwE
-# This script must be in the same directory as the BaseSystem.dmg file.
-# A USB pen drive must also be attached to you PC which the script will erase.
-#==============================================================================
+#
+# This script must be in the same directory as the BaseSystem.dmg file. A USB pen drive
+# must also be attached to your PC. The script will erase partition and format the drive
+# and add macOS recovery installation files extracted from BaseSystem.dmg
+#=========================================================================================
 
 # Some variables with Global scope
 # The device block at which the sd card reader is attached
