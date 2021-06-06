@@ -8,4 +8,4 @@ This script contains most of the commands needed to partition, format and add ma
 None of these programs are needed: Boot Disk Utility or Paragon Partition Manager or Paragon HFS+ for Windows.
 
 #### Acknowledgments
-**cvad** the developer of [Boot Disk Utility](http://cvad-mac.narod.ru/index/bootdiskutility_exe/0-5) provided valuable help with commands to extract the Apple Disk Image (4.hfs) and write it to a USB drive.
+**cvad** the developer of [Boot Disk Utility](http://cvad-mac.narod.ru/index/bootdiskutility_exe/0-5) provided valuable help with commands to extract and write the Apple Disk Image to a USB drive.
