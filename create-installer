@@ -14,6 +14,8 @@
 # Some variables with Global scope
 # The device block at which the sd card reader is attached
 dev_block=""
+# Get the path to the current directory
+curr_dir=$(pwd)
 
 #=========================================================================
 # The init() method 
@@ -72,7 +74,10 @@ unMountIfMounted(){
     
     # This unmounts all partitions of the disk at $dev_block
     # https://askubuntu.com/a/724484/1085131
-    ls ${dev_block}?* | xargs -n1 umount -l
+    # This unmount command DID work in Ubuntu mate but NOT in Manjaro
+    # ls ${dev_block}?* | xargs -n1 umount -l
+    # This version DOES work in Manjaro
+    ls ${dev_block}* | xargs -n1 umount -l
 
 }
 
@@ -104,13 +109,18 @@ wipeFilesystems(){
 	echo "Wiping filesystems on "$dev_block"..."
 	# Credit: https://serverfault.com/a/984334/190972
 	sfdisk --delete $dev_block
-	# Another option is...
-	# sudo wipefs --all $dev_block
-	
+	# sdisk --delete was not enough on one occassion when the usb key was previously formatted to contain a 'iso9660' signature. It deletes filesystems only, not the whole partition table.
+	# I also run this command because: "wipefs can erase filesystem, raid or partition-table signatures (magic strings) from the specified device. It can erase all available signatures."
+	# See: https://man7.org/linux/man-pages/man8/wipefs.8.html
+	wipefs --all $dev_block
+
 }
 
 #============================================================================================
 # Use sfdisk to create the partition layout on the sd card.
+# The first partition is for the EFI folder (I leave its type as 'c' here because it still
+# works that way, also it won't automount in Manjaro > Dolphin file manager if type is EFI.
+# The second partition will contain the macOS installation files.
 #
 # The -EOF lets you indent each line between the EOFs using tabs only. There must not be any 
 # whitespace etc on the same line as the closing EOF.. AFTER the closing EOF. Omitting the
@@ -129,7 +139,7 @@ createFileSystems(){
 	
 	# Partition 1 is FAT32
 	echo "Formatting "${dev_block}1" partition as FAT32..."
-	mkfs.fat -n "BDU" -F 32 ${dev_block}1
+	mkfs.fat -n "macOS EFI" -F 32 ${dev_block}1
 	
 	# Partition 2 is HFS+
 	echo "Formatting "${dev_block}2" partition as HFS+..."
@@ -144,26 +154,85 @@ mountProperly(){
 	mount ${dev_block}1 /mnt/fat32
 	# If I don't include '-o force,rw' then it mounts partition 2 as read only and rsync fails below
 	# https://askubuntu.com/a/332317/1085131
+	# From testing I found that the -o force,rw options are not needed but no harm to include them
 	mount -t hfsplus -o force,rw ${dev_block}2 /mnt/hfsplus
 }
 
 fillPartition(){
 
     FILE="4.hfs"
-    
+
     # Check if 4.hfs exists in the current directory
     if [[ -f $FILE ]];then
         echo "Writing 4.hfs data to USB drive..."
         mkdir -p /mnt/4hfs
         mount -t hfsplus -o loop 4.hfs /mnt/4hfs
+        # Copy the contents of the 4.hfs file in to the hfsplus partition on the macOS USB installer
         # This will take 5-7 minutes for the copy to complete
         # https://applelife.ru/threads/bdu-macos-i-clover-iz-windows-izgotovlenie-zagruzochnoj-flehshki.37189/page-102#post-943270
         rsync -avxHEWz --numeric-ids --info=progress2 /mnt/4hfs/ /mnt/hfsplus
-        umount /mnt/4hfs
     else
         echo "$FILE doesn't exist, exiting"
         exit 1
     fi
+}
+
+copySharedSupport(){
+
+    echo "Copying the SharedSupport folder to the macOS USB Installer..."
+    # Get the full path to the SharedSupport Folder
+    sharedSupportPath=$curr_dir"/SharedSupport"
+
+    # This copies the SharedSupport folder in to the hfsplus partition on the macOS USB Installer
+    rsync -avxHEWz --numeric-ids --info=progress2 $sharedSupportPath "/mnt/hfsplus/Install macOS Catalina.app/Contents"
+}
+
+copyEFIFolder(){
+
+    echo "Copying the Opencore EFI folder to the macOS USB Installer..."
+    # Get the full path to the macos-EFI.img file (your backup of the working Opencore EFI folder)
+    efiFolderPath=$curr_dir"/macos-EFI.img"
+    # Create a mount point for macos-EFI.img
+    mkdir -p /mnt/efi
+    # Loop mount macos-EFI.img
+    mount -o loop $efiFolderPath /mnt/efi
+    # This copies the Opencore EFI folder in to the EFI/Fat32 partition on the macOS USB Installer
+    # Don't need to copy permissions, ownership, groups or timestamps as the destination is a Fat32 fs anyway.
+    # r=recurse into directories, v=give verbose output, H=preserve Hard Links, E=preservce executability
+    # w=copy files whole (don't use delta-xfer), h=give human readable output, l=copy symlinks as symlinks
+    rsync -rvHEWhl --numeric-ids --info=progress2 /mnt/efi/EFI /mnt/fat32
+}
+
+verifyFileSystems(){
+
+    echo "Confirm that both partitions on the macOS USB Installer are mounted as read/write (rw)..."
+    # This method might help in debugging if something is not working
+    # Check if the EFI and hfsplus partitions on the macOS USB Installer actually mounted as read/write
+    #eval result=\`${mount | grep ${dev_block}}\`
+    #echo "$result"
+    mount | grep ${dev_block}
+    # Test the integrity of the hfs+ file system on the hfs+ partition.
+    echo "Testing the integrity of the hfs+ file system on the macOS USB Installer..."
+    fsck.hfsplus -f ${dev_block}2
+}
+
+cleanup(){
+
+    # Remove and delete all mount points
+    echo "Unmounting and deleting /mnt/hfsplus..."
+    umount /mnt/hfsplus
+    rmdir /mnt/hfsplus
+    # umount macos-EFI.img and delete its loopback device
+    echo "Unmounting and deleting /mnt/efi..."
+    umount -vd /mnt/efi
+    rmdir /mnt/efi
+    echo "Unmounting and deleting /mnt/fat32..."
+    umount /mnt/fat32
+    rmdir /mnt/fat32
+    # umount 4.hfs and delete its loopback device.
+    echo "Unmounting and deleting /mnt/4hfs..."
+    umount -vd /mnt/4hfs
+    rmdir /mnt/4hfs
 }
 
 #====================
@@ -178,4 +247,7 @@ createPartitions
 createFileSystems
 mountProperly
 fillPartition
-unMountIfMounted
+copySharedSupport
+copyEFIFolder
+verifyFileSystems
+cleanup
