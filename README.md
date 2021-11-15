@@ -55,6 +55,9 @@ To this...
   </dict>
 ```
 ### Running the create-installer script
+In order to run successfully the script will require at least these linux tools which may need to be installed first:
+> 7z, sfdisk, hfsprogs, mount, rsync
+
 From a terminal change directory to the "install" directory which contains the create-installer script and you run it like this:
 ```
 sudo script -c ./create-installer /home/flex/macOS/install/create-installer-output.txt
