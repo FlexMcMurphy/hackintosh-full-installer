@@ -201,6 +201,7 @@ copyEFIFolder(){
     # r=recurse into directories, v=give verbose output, H=preserve Hard Links, E=preservce executability
     # w=copy files whole (don't use delta-xfer), h=give human readable output, l=copy symlinks as symlinks
     rsync -rvHEWhl --numeric-ids --info=progress2 /mnt/efi/EFI /mnt/fat32
+    rsync -rvHEWhl --numeric-ids --info=progress2 /mnt/efi/ProperTree-master /mnt/fat32
 }
 
 verifyFileSystems(){
